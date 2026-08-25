@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -19,6 +20,7 @@ from ternary_pretrain.evaluation import evaluate_model
 from ternary_pretrain.model import DecoderLM
 from ternary_pretrain.optim import build_optimizer
 from ternary_pretrain.optim.schedule import WarmupStableCooldown
+from ternary_pretrain.quantization import quantization_diagnostics
 from ternary_pretrain.tracking import LocalTracker
 from ternary_pretrain.training.checkpoint import load_checkpoint, save_checkpoint
 from ternary_pretrain.training.distributed import DistributedContext, finalize, initialize
@@ -28,6 +30,7 @@ from ternary_pretrain.training.manifest import (
     write_json_atomic,
     write_json_exclusive,
 )
+from ternary_pretrain.training.performance import CudaStepTimer
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +48,28 @@ def _seed_all(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _configure_runtime(config: RunConfig, device: torch.device) -> None:
+    torch.use_deterministic_algorithms(config.runtime.deterministic, warn_only=False)
+    if device.type != "cuda":
+        return
+    if config.runtime.precision == "bfloat16" and not torch.cuda.is_bf16_supported():
+        raise RuntimeError("the selected CUDA device does not support bfloat16")
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = config.runtime.deterministic
+    torch.backends.cuda.matmul.allow_tf32 = config.runtime.allow_tf32
+    torch.backends.cudnn.allow_tf32 = config.runtime.allow_tf32
+
+
+def _parameters_are_finite(model: nn.Module) -> bool:
+    parameters = list(model.parameters())
+    if not parameters:
+        return True
+    finite = torch.ones((), dtype=torch.bool, device=parameters[0].device)
+    for parameter in parameters:
+        finite.logical_and_(torch.isfinite(parameter).all())
+    return bool(finite)
 
 
 def _new_run_dir(config: RunConfig) -> Path:
@@ -111,6 +136,7 @@ def train(
     tracker: LocalTracker | None = None
     run_dir: Path | None = None
     try:
+        _configure_runtime(config, context.device)
         if config.runtime.micro_batch_size % context.world_size:
             raise ValueError("runtime.micro_batch_size must be divisible by world size")
         # micro_batch_size is shared across all ranks.
@@ -148,7 +174,7 @@ def train(
 
         native_model = DecoderLM(model_config).to(context.device)
         _set_transition_state(native_model, config, consumed_before_micro_batch=0)
-        optimizer, partition = build_optimizer(native_model, config.optimizer)
+        optimizer, partition = build_optimizer(native_model, config.optimizer, config.schedule)
         scheduler = WarmupStableCooldown(optimizer, config.schedule)
         compatibility = checkpoint_identity(config)
 
@@ -184,6 +210,7 @@ def train(
                 tokenizer_hash=tokenizer_hash,
                 train_data_hash=train_stream.identity,
                 validation_data_hash=validation_stream.identity,
+                device=context.device,
             )
             manifest["parameter_partition"] = partition.audit()
             write_json_exclusive(run_dir / "run.json", manifest)
@@ -204,8 +231,10 @@ def train(
         if target_step < completed_steps:
             raise ValueError("stop_after_steps precedes the resumed checkpoint")
         final_metrics: dict[str, float | int] = {}
+        step_timer = CudaStepTimer(context.device)
         model.train()
         while completed_steps < target_step:
+            timer_start = step_timer.start()
             optimizer.zero_grad()
             accumulated_loss = 0.0
             for micro_step in range(config.runtime.gradient_accumulation_steps):
@@ -238,14 +267,19 @@ def train(
                     output = model(inputs, labels=labels)
                     if output.loss is None:
                         raise RuntimeError("training model did not return loss")
+                    if not bool(torch.isfinite(output.loss)):
+                        raise FloatingPointError("training loss is not finite")
                     loss = output.loss / config.runtime.gradient_accumulation_steps
                     loss.backward()
                     accumulated_loss += float(output.loss.detach())
             gradient_norm = torch.nn.utils.clip_grad_norm_(
                 model.parameters(), config.runtime.gradient_clip_norm
             )
+            if not math.isfinite(float(gradient_norm)):
+                raise FloatingPointError("gradient norm is not finite")
             scheduler.step()
             optimizer.step()
+            step_timer.stop(timer_start)
             # Move the data cursor after a complete optimizer step.
             completed_steps += 1
             consumed_tokens += tokens_per_step
@@ -253,11 +287,18 @@ def train(
             mean_loss = _reduced_mean(
                 accumulated_loss / config.runtime.gradient_accumulation_steps, context
             )
-            if (
-                context.is_primary
-                and tracker is not None
-                and (completed_steps % config.runtime.log_interval == 0)
-            ):
+            should_log = completed_steps % config.runtime.log_interval == 0
+            if should_log and not _parameters_are_finite(model):
+                raise FloatingPointError("model parameters are not finite")
+            performance_metrics = step_timer.metrics(tokens_per_step) if should_log else {}
+            if context.is_primary and tracker is not None and should_log:
+                diagnostics: dict[str, float | int] = {}
+                diagnostics.update(performance_metrics)
+                diagnostics.update(optimizer.diagnostics())
+                if native_model.qat_enabled:
+                    diagnostics.update(
+                        quantization_diagnostics(native_model.hidden_matrix_parameters())
+                    )
                 tracker.log(
                     completed_steps,
                     {
@@ -266,6 +307,7 @@ def train(
                         "train/consumed_tokens": consumed_tokens,
                         "train/qat_enabled": int(native_model.qat_enabled),
                         "train/learning_rate": float(optimizer.param_groups[0]["lr"]),
+                        **diagnostics,
                     },
                 )
             if completed_steps % config.runtime.evaluation_interval == 0:

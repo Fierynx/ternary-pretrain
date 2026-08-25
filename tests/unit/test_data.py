@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 from ternary_pretrain.config import ConfigError, DataConfig, TokenizerConfig, file_sha256
 from ternary_pretrain.data import MMapTokenStream
 from ternary_pretrain.data.prepare import prepare_data
+from ternary_pretrain.data.tokenize import tokenize_data
 from ternary_pretrain.data.tokenizer import train_tokenizer
 from tests.testing import ExperimentFixture
 
@@ -96,6 +98,26 @@ def test_prepare_never_overwrites_existing_splits(
     config = prepared_experiment.data_config
     with pytest.raises(FileExistsError):
         prepare_data(config)
+
+
+def test_token_output_is_atomic(
+    prepared_experiment: ExperimentFixture,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ternary_pretrain.data.tokenize as tokenize_module
+
+    output_dir = tmp_path / "atomic-tokens"
+    config = replace(prepared_experiment.data_config, token_output_dir=output_dir)
+
+    def fail_write(*_: object, **__: object) -> dict[str, object]:
+        raise OSError("simulated shard failure")
+
+    monkeypatch.setattr(tokenize_module, "_write_shard", fail_write)
+    with pytest.raises(OSError, match="simulated shard failure"):
+        tokenize_data(config)
+    assert not output_dir.exists()
+    assert not list(tmp_path.glob(".atomic-tokens-*"))
 
 
 def test_tokenizer_training_is_deterministic(

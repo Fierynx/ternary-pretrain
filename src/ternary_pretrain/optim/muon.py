@@ -37,14 +37,16 @@ class Muon(MatrixOptimizer):
         gradient_fp32 = gradient.float()
         state = self.state[parameter]
         momentum_buffer = state.setdefault("momentum_buffer", torch.zeros_like(gradient_fp32))
-        momentum_buffer.mul_(parameter_group["momentum"]).add_(gradient_fp32)
-        nesterov_gradient = gradient_fp32.add(momentum_buffer, alpha=parameter_group["momentum"])
+        momentum = parameter_group["momentum"]
+        momentum_buffer.lerp_(gradient_fp32, 1 - momentum)
+        nesterov_gradient = gradient_fp32.lerp(momentum_buffer, momentum)
         orthogonal_update = newton_schulz_polar(
             nesterov_gradient, parameter_group["newton_schulz_steps"]
         )
         # Keep update sizes comparable across matrix shapes.
         aspect_ratio_scale = max(1.0, parameter.shape[0] / parameter.shape[1]) ** 0.5
+        orthogonal_update.mul_(aspect_ratio_scale)
         parameter.add_(
             orthogonal_update.to(parameter.dtype),
-            alpha=-parameter_group["lr"] * aspect_ratio_scale,
+            alpha=-parameter_group["lr"],
         )

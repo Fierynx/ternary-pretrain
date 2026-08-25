@@ -37,6 +37,7 @@ def build_run_manifest(
     tokenizer_hash: str,
     train_data_hash: str,
     validation_data_hash: str,
+    device: torch.device,
 ) -> dict[str, Any]:
     # Record known safe values only. Never copy environment variables here.
     lock = repo_root / "uv.lock"
@@ -56,6 +57,18 @@ def build_run_manifest(
             dependencies[package] = importlib.metadata.version(package)
         except importlib.metadata.PackageNotFoundError:
             dependencies[package] = None
+    accelerator: dict[str, Any] = {"device_type": device.type}
+    if device.type == "cuda":
+        properties = torch.cuda.get_device_properties(device)
+        accelerator.update(
+            {
+                "name": properties.name,
+                "total_memory_bytes": properties.total_memory,
+                "compute_capability": list(torch.cuda.get_device_capability(device)),
+                "cuda_runtime": torch.version.cuda,
+                "cudnn": torch.backends.cudnn.version(),  # type: ignore[no-untyped-call]
+            }
+        )
     return {
         "format_version": 1,
         "created_at": datetime.now(UTC).isoformat(),
@@ -82,6 +95,7 @@ def build_run_manifest(
             "system": platform.system(),
             "release": platform.release(),
             "machine": platform.machine(),
+            "accelerator": accelerator,
         },
         "dependencies": dependencies,
     }

@@ -54,6 +54,7 @@ class TokenizerConfig:
     vocab_size: int
     min_frequency: int
     eod_token: str
+    max_documents: int | None = None
 
     def validate(self, *, require_inputs: bool = True) -> None:
         if type(self.vocab_size) is not int or not 258 <= self.vocab_size <= 65_536:
@@ -65,6 +66,10 @@ class TokenizerConfig:
             or not self.eod_token
         ):
             raise ConfigError("min_frequency and eod_token must be non-empty positive values")
+        if self.max_documents is not None and (
+            type(self.max_documents) is not int or self.max_documents < 1
+        ):
+            raise ConfigError("tokenizer max_documents must be positive")
         if require_inputs:
             _require_files(self.input_files, "tokenizer input")
 
@@ -136,6 +141,8 @@ class RuntimeConfig:
     log_interval: int
     checkpoint_interval: int
     evaluation_interval: int
+    deterministic: bool = True
+    allow_tf32: bool = False
 
     def validate(self) -> None:
         counts = (
@@ -157,6 +164,8 @@ class RuntimeConfig:
             raise ConfigError(f"unsupported distributed backend: {self.distributed_backend}")
         if self.precision not in {"float32", "bfloat16"}:
             raise ConfigError(f"unsupported training precision: {self.precision}")
+        if type(self.deterministic) is not bool or type(self.allow_tf32) is not bool:
+            raise ConfigError("deterministic and allow_tf32 must be booleans")
         if self.device == "cpu" and self.precision != "float32":
             raise ConfigError("CPU training requires float32 precision")
         if self.distributed_backend == "nccl" and self.device != "cuda":
@@ -176,6 +185,8 @@ class OptimizerConfig:
     eps: float
     momentum: float
     newton_schulz_steps: int
+    angular_decay_scale: float = 0.001
+    angular_decay_degree: float = 1.0
 
     def validate(self) -> None:
         if self.kind not in {"adamw", "muon", "muown", "angular_muown"}:
@@ -201,6 +212,13 @@ class OptimizerConfig:
             or self.newton_schulz_steps < 1
         ):
             raise ConfigError("momentum or Newton-Schulz step count is out of range")
+        if (
+            type(self.angular_decay_scale) not in {int, float}
+            or self.angular_decay_scale <= 0
+            or type(self.angular_decay_degree) not in {int, float}
+            or self.angular_decay_degree < 0
+        ):
+            raise ConfigError("AngularMuown decay values are out of range")
 
 
 @dataclass(frozen=True, slots=True)

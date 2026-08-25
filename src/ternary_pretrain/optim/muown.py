@@ -7,11 +7,11 @@ import torch
 from torch import Tensor, nn
 
 from ternary_pretrain.optim._matrix import MatrixOptimizer
-from ternary_pretrain.optim.polar import newton_schulz_polar, row_normalize
+from ternary_pretrain.optim.polar import muown_newton_schulz
 
 
 class Muown(MatrixOptimizer):
-    """Combine Muon direction updates with Adam-style row-magnitude updates."""
+    """Apply Muon to implicit directions and Adam to their row magnitudes."""
 
     def __init__(
         self,
@@ -34,64 +34,81 @@ class Muown(MatrixOptimizer):
             },
         )
 
-    def _direction_gradient(
-        self, direction: Tensor, row_magnitude: Tensor, gradient: Tensor
-    ) -> Tensor:
-        del direction, row_magnitude
-        return gradient
-
-    def _update_row_magnitude(
-        self,
-        parameter: nn.Parameter,
-        radial_gradient: Tensor,
-        row_magnitude: Tensor,
-        parameter_group: dict[str, Any],
-    ) -> Tensor:
+    def _initialize_state(self, parameter: nn.Parameter) -> dict[str, Any]:
         state = self.state[parameter]
-        state["step"] = int(state.get("step", 0)) + 1
-        first_moment = state.setdefault("row_exp_avg", torch.zeros_like(radial_gradient))
-        second_moment = state.setdefault("row_exp_avg_sq", torch.zeros_like(radial_gradient))
-        beta1, beta2 = parameter_group["betas"]
-        first_moment.mul_(beta1).add_(radial_gradient, alpha=1 - beta1)
-        second_moment.mul_(beta2).addcmul_(radial_gradient, radial_gradient, value=1 - beta2)
-        step = state["step"]
-        corrected_first_moment = first_moment / (1 - beta1**step)
-        corrected_second_moment = second_moment / (1 - beta2**step)
-        update = corrected_first_moment / (corrected_second_moment.sqrt() + parameter_group["eps"])
-        return cast(
-            Tensor,
-            (row_magnitude - parameter_group["lr"] * update).clamp_min(parameter_group["eps"]),
-        )
+        row_norm = parameter.float().norm(dim=1, keepdim=True)
+        state["row_magnitude"] = row_norm.clone()
+        state["direction_norm"] = row_norm.clone()
+        state["direction_momentum"] = torch.zeros_like(parameter, dtype=torch.float32)
+        state["row_exp_avg"] = torch.zeros_like(row_norm)
+        state["row_exp_avg_sq"] = torch.zeros_like(row_norm)
+        state["step"] = 0
+        return cast(dict[str, Any], state)
 
     def _update_parameter(
         self, parameter: nn.Parameter, gradient: Tensor, parameter_group: dict[str, Any]
     ) -> None:
         parameter_fp32 = parameter.float()
         gradient_fp32 = gradient.float()
-        # Split each row into its length and direction.
-        direction = row_normalize(parameter_fp32)
-        row_magnitude = parameter_fp32.norm(dim=1, keepdim=True).clamp_min(parameter_group["eps"])
-        radial_gradient = (gradient_fp32 * direction).sum(dim=1, keepdim=True)
-        next_row_magnitude = self._update_row_magnitude(
-            parameter, radial_gradient, row_magnitude, parameter_group
+        state = self.state[parameter]
+        if not state:
+            state = self._initialize_state(parameter)
+
+        state["step"] += 1
+        step = state["step"]
+        eps = parameter_group["eps"]
+        row_magnitude = state["row_magnitude"]
+        direction_norm = state["direction_norm"]
+        safe_magnitude = torch.copysign(row_magnitude.abs().clamp_min(eps), row_magnitude)
+        safe_direction_norm = direction_norm.clamp_min(eps)
+
+        unit_direction = parameter_fp32 / safe_magnitude
+        direction = unit_direction * safe_direction_norm
+        radial_gradient = (gradient_fp32 * unit_direction).sum(dim=1, keepdim=True)
+        direction_gradient = (row_magnitude / safe_direction_norm) * (
+            gradient_fp32 - unit_direction * radial_gradient
         )
 
-        direction_gradient = self._direction_gradient(direction, row_magnitude, gradient_fp32)
-        state = self.state[parameter]
-        direction_momentum = state.setdefault(
-            "direction_momentum", torch.zeros_like(direction_gradient)
-        )
-        direction_momentum.mul_(parameter_group["momentum"]).add_(direction_gradient)
-        nesterov_gradient = direction_gradient.add(
-            direction_momentum, alpha=parameter_group["momentum"]
-        )
-        orthogonal_update = newton_schulz_polar(
+        momentum = parameter_group["momentum"]
+        direction_momentum = state["direction_momentum"]
+        direction_momentum.mul_(momentum).add_(direction_gradient)
+        nesterov_gradient = direction_gradient.add(direction_momentum, alpha=momentum)
+        orthogonal_update = muown_newton_schulz(
             nesterov_gradient, parameter_group["newton_schulz_steps"]
         )
-        aspect_ratio_scale = max(1.0, parameter.shape[0] / parameter.shape[1]) ** 0.5
-        next_direction = row_normalize(
-            direction - parameter_group["lr"] * aspect_ratio_scale * orthogonal_update
+        direction_scale = 0.2 * max(parameter.shape) ** 0.5
+        next_direction = direction.add(
+            orthogonal_update, alpha=-parameter_group["lr"] * direction_scale
         )
-        # Normalize directions before restoring row lengths.
-        parameter.copy_((next_row_magnitude * next_direction).to(parameter.dtype))
-        state["row_magnitude"] = next_row_magnitude.clone()
+
+        beta1, beta2 = parameter_group["betas"]
+        first_moment = state["row_exp_avg"]
+        second_moment = state["row_exp_avg_sq"]
+        first_moment.mul_(beta1).add_(radial_gradient, alpha=1 - beta1)
+        second_moment.mul_(beta2).addcmul_(radial_gradient, radial_gradient, value=1 - beta2)
+        corrected_first = first_moment / (1 - beta1**step)
+        corrected_second = second_moment / (1 - beta2**step)
+        row_magnitude.addcdiv_(
+            corrected_first,
+            corrected_second.sqrt().add_(eps),
+            value=-parameter_group["lr"],
+        )
+
+        next_direction_norm = next_direction.norm(dim=1, keepdim=True).clamp_min(eps)
+        parameter.copy_((row_magnitude * next_direction / next_direction_norm).to(parameter.dtype))
+        state["direction_norm"] = next_direction_norm
+
+    @torch.no_grad()
+    def diagnostics(self) -> dict[str, float]:
+        magnitudes = [
+            state["row_magnitude"].abs().reshape(-1)
+            for state in self.state.values()
+            if "row_magnitude" in state
+        ]
+        if not magnitudes:
+            return {}
+        values = torch.cat(magnitudes)
+        return {
+            "optimizer/row_magnitude_mean": float(values.mean()),
+            "optimizer/row_magnitude_max": float(values.max()),
+        }

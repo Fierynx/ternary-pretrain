@@ -9,7 +9,8 @@ from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
 from ternary_pretrain.config import TokenizerConfig, file_sha256
 
 
-def _texts(paths: tuple[Path, ...]) -> Iterator[str]:
+def _texts(paths: tuple[Path, ...], max_documents: int | None) -> Iterator[str]:
+    document_count = 0
     for path in paths:
         with path.open("r", encoding="utf-8") as stream:
             for line in stream:
@@ -19,6 +20,9 @@ def _texts(paths: tuple[Path, ...]) -> Iterator[str]:
                     if not isinstance(text, str):
                         raise ValueError(f"document in {path} has no text field")
                     yield text
+                    document_count += 1
+                    if max_documents is not None and document_count >= max_documents:
+                        return
 
 
 def train_tokenizer(config: TokenizerConfig) -> Path:
@@ -33,7 +37,7 @@ def train_tokenizer(config: TokenizerConfig) -> Path:
         initial_alphabet=pre_tokenizers.ByteLevel.alphabet(),
         show_progress=False,
     )
-    tokenizer.train_from_iterator(_texts(config.input_files), trainer=trainer)
+    tokenizer.train_from_iterator(_texts(config.input_files, config.max_documents), trainer=trainer)
     if tokenizer.token_to_id(config.eod_token) is None:
         raise RuntimeError("trained tokenizer does not contain the end-of-document token")
     config.output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -47,6 +51,7 @@ def train_tokenizer(config: TokenizerConfig) -> Path:
         "eod_token": config.eod_token,
         "eod_token_id": tokenizer.token_to_id(config.eod_token),
         "input_sha256": [file_sha256(path) for path in config.input_files],
+        "max_documents": config.max_documents,
     }
     config.output_file.with_suffix(".metadata.json").write_text(
         json.dumps(metadata, indent=2, sort_keys=True) + "\n", encoding="utf-8"

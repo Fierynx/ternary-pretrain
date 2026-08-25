@@ -1,0 +1,48 @@
+name = "gpu-canary"
+output_dir = "../../artifacts/runs"
+model_config = "../models/25m.toml"
+train_manifest = "../../artifacts/data/fineweb_edu/tokens/train.manifest.json"
+validation_manifest = "../../artifacts/data/fineweb_edu/tokens/validation.manifest.json"
+tokenizer_file = "../../artifacts/tokenizers/fineweb_edu_32k/tokenizer.json"
+seed = 1729
+
+[runtime]
+device = "cuda"
+distributed_backend = "nccl"
+precision = "bfloat16"
+max_steps = 50
+micro_batch_size = 8
+gradient_accumulation_steps = 4
+sequence_length = 2048
+gradient_clip_norm = 1.0
+log_interval = 5
+checkpoint_interval = 10
+evaluation_interval = 25
+deterministic = true
+allow_tf32 = false
+
+[optimizer]
+kind = "angular_muown"
+learning_rate = 0.02
+auxiliary_learning_rate = 0.0003
+weight_decay = 0.01
+betas = [0.9, 0.95]
+eps = 1e-8
+momentum = 0.95
+newton_schulz_steps = 5
+angular_decay_scale = 0.001
+angular_decay_degree = 1.0
+
+[schedule]
+warmup_steps = 5
+stable_steps = 40
+cooldown_steps = 5
+final_learning_rate_ratio = 0.1
+
+[quantization]
+mode = "transition"
+transition_tokens = 655360
+
+[tracking]
+tensorboard = true
+wandb = false

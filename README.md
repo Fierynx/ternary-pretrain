@@ -58,3 +58,19 @@ uv run python -m ternary_pretrain.torchrun --standalone --nproc-per-node=2 `
 ```
 
 On Linux, the equivalent command uses `uv run torchrun` directly.
+
+## FineWeb-Edu preparation
+
+The production data config pins a FineWeb-Edu commit, names two Parquet files, and caps the
+document count. Data preparation streams documents to disk instead of loading the corpus into
+memory.
+
+```console
+uv run ternary-pretrain data prepare --config configs/data/fineweb_edu.toml
+uv run ternary-pretrain tokenizer train --config configs/tokenizers/fineweb_edu_32k.toml
+uv run ternary-pretrain data tokenize --config configs/data/fineweb_edu.toml
+```
+
+The CUDA configs under `configs/runs/` require those artifacts. Validate their resolved values
+before copying artifacts to a paid machine; provider credentials and billing files belong under
+the ignored `configs/local/` directory.

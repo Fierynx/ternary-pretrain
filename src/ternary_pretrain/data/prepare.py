@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterator
 from itertools import chain, islice
 from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as parquet
-from huggingface_hub import snapshot_download
 
 from ternary_pretrain.config import DataConfig, file_sha256
 
@@ -33,7 +33,7 @@ def _read_parquet(path: Path) -> Iterator[str]:
                 yield text
 
 
-def _source_documents(config: DataConfig) -> tuple[list[str], dict[str, Any]]:
+def _source_documents(config: DataConfig) -> tuple[Iterator[str], dict[str, Any]]:
     source: dict[str, Any]
     if config.mode == "local":
         document_iterator = chain.from_iterable(_read_jsonl(path) for path in config.source_files)
@@ -45,6 +45,11 @@ def _source_documents(config: DataConfig) -> tuple[list[str], dict[str, Any]]:
             ],
         }
     else:
+        # Use the declared HTTP dependency path on machines without optional Xet or symlinks.
+        os.environ["HF_HUB_DISABLE_XET"] = "1"
+        os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+        from huggingface_hub import snapshot_download
+
         # Download only the pinned files listed in the config.
         snapshot = Path(
             snapshot_download(
@@ -70,41 +75,54 @@ def _source_documents(config: DataConfig) -> tuple[list[str], dict[str, Any]]:
             "repo_id": config.repo_id,
             "revision": config.revision,
             "allow_patterns": list(config.allow_patterns),
-            "files": [path.relative_to(snapshot).as_posix() for path in files],
+            "files": [
+                {
+                    "path": path.relative_to(snapshot).as_posix(),
+                    "sha256": file_sha256(path),
+                }
+                for path in files
+            ],
         }
-    documents = list(islice(document_iterator, config.max_documents))
-    if len(documents) < 2:
-        raise ValueError("at least two documents are required")
-    return documents, source
+    return islice(document_iterator, config.max_documents), source
 
 
 def prepare_data(config: DataConfig) -> Path:
     """Prepare immutable train and validation JSONL splits plus a source manifest."""
     documents, source = _source_documents(config)
-    # Include the source position so duplicate documents still get unique IDs.
-    identities = [
-        hashlib.sha256(f"{config.seed}\0{index}\0{text}".encode()).hexdigest()
-        for index, text in enumerate(documents)
-    ]
-    validation_count = max(
-        1, min(len(documents) - 1, round(len(documents) * config.validation_fraction))
-    )
-    validation_ids = set(sorted(identities)[:validation_count])
     config.output_dir.mkdir(parents=True, exist_ok=True)
+    outputs = {split: config.output_dir / f"{split}.jsonl" for split in ("train", "validation")}
+    existing = [
+        str(path)
+        for path in (*outputs.values(), config.output_dir / "prepare.manifest.json")
+        if path.exists()
+    ]
+    if existing:
+        raise FileExistsError(f"prepared data already exists: {', '.join(existing)}")
     split_counts: dict[str, int] = {}
     split_hashes: dict[str, str] = {}
-    for split in ("train", "validation"):
-        selected = [
-            (identity, text)
-            for identity, text in zip(identities, documents, strict=True)
-            if (identity in validation_ids) == (split == "validation")
-        ]
-        output = config.output_dir / f"{split}.jsonl"
-        # Do not overwrite data that another artifact may already use.
-        with output.open("x", encoding="utf-8", newline="\n") as stream:
-            for identity, text in selected:
-                stream.write(json.dumps({"id": identity, "text": text}, ensure_ascii=False) + "\n")
-        split_counts[split] = len(selected)
+    split_counts = {"train": 0, "validation": 0}
+    threshold = int(config.validation_fraction * (1 << 64))
+    try:
+        with (
+            outputs["train"].open("x", encoding="utf-8", newline="\n") as train_stream,
+            outputs["validation"].open("x", encoding="utf-8", newline="\n") as validation_stream,
+        ):
+            streams = {"train": train_stream, "validation": validation_stream}
+            for index, text in enumerate(documents):
+                # The source position keeps duplicate documents distinct.
+                identity = hashlib.sha256(f"{config.seed}\0{index}\0{text}".encode()).hexdigest()
+                split = "validation" if int(identity[:16], 16) < threshold else "train"
+                streams[split].write(
+                    json.dumps({"id": identity, "text": text}, ensure_ascii=False) + "\n"
+                )
+                split_counts[split] += 1
+        if min(split_counts.values()) == 0:
+            raise ValueError("prepared data requires at least one document in each split")
+    except BaseException:
+        for output in outputs.values():
+            output.unlink(missing_ok=True)
+        raise
+    for split, output in outputs.items():
         split_hashes[split] = file_sha256(output)
     manifest = config.output_dir / "prepare.manifest.json"
     payload = {

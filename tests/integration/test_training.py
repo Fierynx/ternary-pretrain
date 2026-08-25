@@ -46,6 +46,7 @@ def test_uninterrupted_and_resumed_training_are_identical(
     assert "fake-vast-credential" not in serialized_manifest
     assert "fake-huggingface-credential" not in serialized_manifest
     assert run_manifest["training"]["world_size"] == 1
+    assert run_manifest["platform"]["accelerator"] == {"device_type": "cpu"}
     assert "wandb" not in sys.modules
 
 

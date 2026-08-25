@@ -1,0 +1,15 @@
+mode = "huggingface"
+source_files = []
+output_dir = "../../artifacts/data/fineweb_edu"
+tokenizer_file = "../../artifacts/tokenizers/fineweb_edu_32k/tokenizer.json"
+token_output_dir = "../../artifacts/data/fineweb_edu/tokens"
+validation_fraction = 0.01
+seed = 1729
+shard_token_limit = 8388608
+repo_id = "HuggingFaceFW/fineweb-edu"
+revision = "fc9850dff5e2d0f8f776efe41b24a1c49556cfc5"
+allow_patterns = [
+  "sample/10BT/000_00000.parquet",
+  "sample/10BT/001_00000.parquet",
+]
+max_documents = 2000000

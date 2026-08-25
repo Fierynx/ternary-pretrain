@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 
 import torch
 from torch import Tensor, nn
@@ -25,6 +26,35 @@ def ternary_weight(weight: Tensor) -> Tensor:
     quantized = torch.round(centered / scale).clamp_(-1, 1) * scale
     # Use quantized weights in forward, but keep gradients on the full weights.
     return weight + (quantized - weight).detach()
+
+
+@torch.no_grad()
+def quantization_diagnostics(weights: Iterable[Tensor]) -> dict[str, float]:
+    total_values = 0
+    zero_values = 0
+    squared_error = torch.tensor(0.0)
+    squared_weight = torch.tensor(0.0)
+    scales = []
+    for weight in weights:
+        centered, scale = centered_scale(weight.float())
+        codes = torch.round(centered / scale).clamp_(-1, 1)
+        quantized = codes * scale
+        total_values += weight.numel()
+        zero_values += int((codes == 0).sum())
+        squared_error = (
+            squared_error.to(weight.device) + (quantized - weight.float()).square().sum()
+        )
+        squared_weight = squared_weight.to(weight.device) + weight.float().square().sum()
+        scales.append(scale)
+    if total_values == 0:
+        return {}
+    mean_scale = torch.stack(scales).mean()
+    relative_error = squared_error / squared_weight.clamp_min(torch.finfo(torch.float32).eps)
+    return {
+        "quantization/zero_fraction": zero_values / total_values,
+        "quantization/relative_squared_error": float(relative_error),
+        "quantization/mean_scale": float(mean_scale),
+    }
 
 
 class TernaryLinear(nn.Module):

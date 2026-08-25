@@ -6,7 +6,7 @@ from typing import Any
 import torch
 from torch import nn
 
-from ternary_pretrain.config import OptimizerConfig
+from ternary_pretrain.config import OptimizerConfig, ScheduleConfig
 from ternary_pretrain.model import DecoderLM
 from ternary_pretrain.optim.angular_muown import AngularMuown
 from ternary_pretrain.optim.muon import Muon
@@ -74,9 +74,17 @@ class CompositeOptimizer:
         for name, optimizer in self.optimizers.items():
             optimizer.load_state_dict(state_dict[name])
 
+    def diagnostics(self) -> dict[str, float]:
+        metrics: dict[str, float] = {}
+        for optimizer in self.optimizers.values():
+            diagnostics = getattr(optimizer, "diagnostics", None)
+            if diagnostics is not None:
+                metrics.update(diagnostics())
+        return metrics
+
 
 def build_optimizer(
-    model: DecoderLM, config: OptimizerConfig
+    model: DecoderLM, config: OptimizerConfig, schedule: ScheduleConfig | None = None
 ) -> tuple[CompositeOptimizer, ParameterPartition]:
     partition = ParameterPartition.from_model(model)
     if config.kind == "adamw":
@@ -107,6 +115,8 @@ def build_optimizer(
             eps=config.eps,
         )
     else:
+        if schedule is None:
+            raise ValueError("AngularMuown requires the run schedule")
         matrix = AngularMuown(
             matrix_parameters,
             lr=config.learning_rate,
@@ -114,6 +124,9 @@ def build_optimizer(
             newton_schulz_steps=config.newton_schulz_steps,
             betas=config.betas,
             eps=config.eps,
+            warmup_steps=schedule.warmup_steps,
+            decay_scale=config.angular_decay_scale,
+            decay_degree=config.angular_decay_degree,
         )
     auxiliary = torch.optim.AdamW(
         (parameter for _, parameter in partition.auxiliary),

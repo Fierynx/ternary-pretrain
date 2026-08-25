@@ -4,7 +4,12 @@ import torch
 
 from ternary_pretrain.config import ModelConfig
 from ternary_pretrain.model import DecoderLM
-from ternary_pretrain.quantization import TernaryLinear, ternary_codes, ternary_weight
+from ternary_pretrain.quantization import (
+    TernaryLinear,
+    quantization_diagnostics,
+    ternary_codes,
+    ternary_weight,
+)
 from ternary_pretrain.quantization.ternary import centered_scale
 
 
@@ -39,3 +44,12 @@ def test_ternary_linear_toggle_preserves_activations_as_float() -> None:
     inputs = torch.randn(2, 4, dtype=torch.float32)
     layer.set_qat_enabled(True)
     assert layer(inputs).dtype == torch.float32
+
+
+def test_quantization_diagnostics_match_codes() -> None:
+    weight = torch.tensor([[-2.0, -0.1, 0.4], [0.9, 1.3, 4.0]])
+    metrics = quantization_diagnostics((weight,))
+    codes = ternary_codes(weight)
+    assert metrics["quantization/zero_fraction"] == float((codes == 0).sum()) / weight.numel()
+    assert metrics["quantization/relative_squared_error"] >= 0
+    assert metrics["quantization/mean_scale"] > 0

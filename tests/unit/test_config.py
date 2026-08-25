@@ -10,7 +10,9 @@ from ternary_pretrain.config import (
     OptimizerConfig,
     OptimizerKind,
     config_hash,
+    load_data_config,
     load_model_config,
+    load_run_config,
 )
 
 
@@ -76,3 +78,19 @@ def test_25m_config_has_expected_parameter_count() -> None:
     model = DecoderLM(load_model_config(root / "configs/models/25m.toml"))
     count = sum(parameter.numel() for parameter in model.parameters())
     assert 25_000_000 <= count <= 26_000_000
+
+
+def test_gpu_configs_are_explicit_and_frozen() -> None:
+    root = Path(__file__).resolve().parents[2]
+    data = load_data_config(root / "configs/data/fineweb_edu.toml")
+    assert len(data.revision or "") == 40
+    assert data.allow_patterns == (
+        "sample/10BT/000_00000.parquet",
+        "sample/10BT/001_00000.parquet",
+    )
+    for name in ("gpu_canary.toml", "25m_pilot.toml"):
+        run = load_run_config(root / "configs/runs" / name, require_artifacts=False)
+        assert run.runtime.device == "cuda"
+        assert run.runtime.precision == "bfloat16"
+        assert run.runtime.deterministic is True
+        assert run.runtime.allow_tf32 is False
