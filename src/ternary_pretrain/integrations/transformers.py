@@ -58,12 +58,12 @@ class TernaryPretrainedConfig(PretrainedConfig):
         )
 
 
-class TernaryPreTrainedModel(PreTrainedModel): # type: ignore[no-untyped-call]
+class TernaryPreTrainedModel(PreTrainedModel):  # type: ignore[no-untyped-call]
     """Serialization adapter that delegates logits to the native implementation."""
 
-    config_class = TernaryPretrainedConfig # type: ignore[assignment]
+    config_class = TernaryPretrainedConfig  # type: ignore[assignment]
     base_model_prefix = "native_model"
-    _tied_weights_keys = ("native_model.lm_head.weight",) # type: ignore[assignment]
+    _tied_weights_keys = ("native_model.lm_head.weight",)  # type: ignore[assignment]
 
     def __init__(self, config: TernaryPretrainedConfig) -> None:
         super().__init__(config)

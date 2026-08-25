@@ -12,7 +12,6 @@ from safetensors.torch import load_model
 from ternary_pretrain.config import OptimizerKind, QuantizationMode
 from ternary_pretrain.evaluation.runner import evaluate_checkpoint, load_native_checkpoint
 from ternary_pretrain.export import export_checkpoint
-from ternary_pretrain.integrations.transformers import TernaryPreTrainedModel
 from ternary_pretrain.model import DecoderLM
 from ternary_pretrain.training import train
 from tests.testing import ExperimentFixture
@@ -95,6 +94,8 @@ def test_minimal_training_run_for_every_qat_mode(
 def test_evaluation_native_and_huggingface_exports_match_logits(
     prepared_experiment: ExperimentFixture,
 ) -> None:
+    from ternary_pretrain.integrations.transformers import TernaryPreTrainedModel
+
     config = prepared_experiment.run_config
     result = train(config)
     metrics = evaluate_checkpoint(config, result.checkpoint, max_batches=1)
