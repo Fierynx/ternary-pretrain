@@ -1,0 +1,20 @@
+{"text":"A small deterministic corpus exercises tokenization and language-model training."}
+{"text":"Each document has a stable identity derived from its complete UTF-8 contents."}
+{"text":"Exact resume restores model, optimizer, scheduler, random state, and data position."}
+{"text":"Ternary matrices use only minus one, zero, and one before applying their scale."}
+{"text":"Attention maps queries to grouped key and value heads with a causal mask."}
+{"text":"The tokenizer operates on bytes so every input string remains representable."}
+{"text":"Validation documents are selected independently from the training documents."}
+{"text":"A checkpoint becomes visible only after its temporary file is completely written."}
+{"text":"Metrics are appended as JSON objects and can be consumed without a service."}
+{"text":"A compact CPU model is sufficient to verify the complete software lifecycle."}
+{"text":"Learning-rate warmup is followed by a stable interval and a linear cooldown."}
+{"text":"Parameters assigned to the matrix optimizer never enter the auxiliary optimizer."}
+{"text":"Rotary position embeddings rotate paired channels without learned parameters."}
+{"text":"The output projection shares storage with the input token embedding matrix."}
+{"text":"Loss is computed in float32 even when a future accelerator uses lower precision."}
+{"text":"Source revisions and content hashes make prepared artifacts independently auditable."}
+{"text":"Distributed ranks consume separate examples from the same logical global batch."}
+{"text":"Native exports preserve latent weights rather than replacing them with packed codes."}
+{"text":"Cost reports divide recorded billing totals by successfully processed token counts."}
+{"text":"No padding token is needed because pre-training samples are fixed-length streams."}

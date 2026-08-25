@@ -1,0 +1,5 @@
+input_files = ["../../artifacts/data/fineweb_edu/train.jsonl"]
+output_file = "../../artifacts/tokenizers/fineweb_edu_32k/tokenizer.json"
+vocab_size = 32768
+min_frequency = 2
+eod_token = "<|endofdocument|>"

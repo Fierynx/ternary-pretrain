@@ -1,0 +1,44 @@
+name = "cpu-smoke"
+output_dir = "../../artifacts/runs"
+model_config = "../models/tiny.toml"
+train_manifest = "../../artifacts/data/dev/tokens/train.manifest.json"
+validation_manifest = "../../artifacts/data/dev/tokens/validation.manifest.json"
+tokenizer_file = "../../artifacts/tokenizers/dev/tokenizer.json"
+seed = 1729
+
+[runtime]
+device = "cpu"
+distributed_backend = "gloo"
+precision = "float32"
+max_steps = 8
+micro_batch_size = 2
+gradient_accumulation_steps = 2
+sequence_length = 32
+gradient_clip_norm = 1.0
+log_interval = 1
+checkpoint_interval = 4
+evaluation_interval = 4
+
+[optimizer]
+kind = "adamw"
+learning_rate = 0.001
+auxiliary_learning_rate = 0.001
+weight_decay = 0.01
+betas = [0.9, 0.95]
+eps = 1e-8
+momentum = 0.95
+newton_schulz_steps = 5
+
+[schedule]
+warmup_steps = 2
+stable_steps = 4
+cooldown_steps = 2
+final_learning_rate_ratio = 0.1
+
+[quantization]
+mode = "transition"
+transition_tokens = 512
+
+[tracking]
+tensorboard = true
+wandb = false

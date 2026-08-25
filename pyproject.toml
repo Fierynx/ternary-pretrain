@@ -1,0 +1,63 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ternary-pretrain"
+version = "0.1.0"
+description = "Deterministic pre-training experiments with ternary weight QAT"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = "Apache-2.0"
+dependencies = [
+  "huggingface-hub>=0.34,<1.0",
+  "numpy>=2.2,<3",
+  "pyarrow>=19,<22",
+  "safetensors>=0.5,<1",
+  "tensorboard>=2.19,<3",
+  "tokenizers>=0.21,<1",
+  "torch==2.13.0",
+]
+
+[project.optional-dependencies]
+transformers = ["transformers>=4.55,<5"]
+wandb = ["wandb>=0.21,<1"]
+
+[dependency-groups]
+dev = [
+  "mypy>=1.17,<2",
+  "pytest>=8.4,<9",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+ternary-pretrain = "ternary_pretrain.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ternary_pretrain"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+packages = ["ternary_pretrain"]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*", "tokenizers.*", "wandb.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+markers = ["ddp: multi-process distributed test"]

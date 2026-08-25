@@ -1,0 +1,5 @@
+input_files = ["../../artifacts/data/dev/train.jsonl"]
+output_file = "../../artifacts/tokenizers/dev/tokenizer.json"
+vocab_size = 512
+min_frequency = 1
+eod_token = "<|endofdocument|>"

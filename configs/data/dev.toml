@@ -1,0 +1,8 @@
+mode = "local"
+source_files = ["../../tests/fixtures/corpus.jsonl"]
+output_dir = "../../artifacts/data/dev"
+tokenizer_file = "../../artifacts/tokenizers/dev/tokenizer.json"
+token_output_dir = "../../artifacts/data/dev/tokens"
+validation_fraction = 0.2
+seed = 1729
+shard_token_limit = 65536
