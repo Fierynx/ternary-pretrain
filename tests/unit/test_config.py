@@ -94,3 +94,31 @@ def test_gpu_configs_are_explicit_and_frozen() -> None:
         assert run.runtime.precision == "bfloat16"
         assert run.runtime.deterministic is True
         assert run.runtime.allow_tf32 is False
+
+
+def test_lr_calibration_matrix_is_qat_disabled() -> None:
+    root = Path(__file__).resolve().parents[2]
+    calibration_dir = root / "configs/runs/calibration"
+    expected = {
+        "adamw-3e-4.toml": ("adamw", 3e-4),
+        "adamw-6e-4.toml": ("adamw", 6e-4),
+        "adamw-1p2e-3.toml": ("adamw", 1.2e-3),
+        "muon-1e-2.toml": ("muon", 1e-2),
+        "muon-2e-2.toml": ("muon", 2e-2),
+        "muon-4e-2.toml": ("muon", 4e-2),
+        "muown-1e-3.toml": ("muown", 1e-3),
+        "muown-2e-3.toml": ("muown", 2e-3),
+        "muown-4e-3.toml": ("muown", 4e-3),
+        "angular-muown-1e-2.toml": ("angular_muown", 1e-2),
+        "angular-muown-2e-2.toml": ("angular_muown", 2e-2),
+        "angular-muown-4e-2.toml": ("angular_muown", 4e-2),
+    }
+    assert {path.name for path in calibration_dir.glob("*.toml")} == set(expected)
+    for name, (optimizer, learning_rate) in expected.items():
+        run = load_run_config(calibration_dir / name, require_artifacts=False)
+        assert run.optimizer.kind == optimizer
+        assert run.optimizer.learning_rate == learning_rate
+        assert run.quantization.mode == "disabled"
+        assert run.seed == 1729
+        assert run.runtime.max_steps == 1000
+        assert run.runtime.checkpoint_interval == run.runtime.max_steps

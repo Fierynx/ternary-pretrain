@@ -1,0 +1,15 @@
+**
+!README.md
+!pyproject.toml
+!uv.lock
+!configs/
+!configs/data/
+!configs/data/**
+!configs/models/
+!configs/models/**
+!configs/runs/
+!configs/runs/**
+!configs/tokenizers/
+!configs/tokenizers/**
+!src/
+!src/**

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import platform
+import re
 import subprocess
 import sys
 from datetime import UTC, datetime
@@ -26,6 +27,12 @@ def _git_state(repo: Path) -> dict[str, str | bool | None]:
 
     revision = command("rev-parse", "HEAD")
     status = command("status", "--porcelain", "--untracked-files=normal")
+    if revision is None:
+        build_revision = repo / ".build-revision"
+        if build_revision.is_file():
+            candidate = build_revision.read_text(encoding="utf-8").strip()
+            if re.fullmatch(r"[0-9a-f]{40}", candidate):
+                revision = candidate
     return {"revision": revision, "dirty": None if status is None else bool(status)}
 
 

@@ -1,9 +1,9 @@
-name = "25m-pilot"
-output_dir = "../../artifacts/runs"
-model_config = "../models/25m.toml"
-train_manifest = "../../artifacts/data/fineweb_edu/tokens/train.manifest.json"
-validation_manifest = "../../artifacts/data/fineweb_edu/tokens/validation.manifest.json"
-tokenizer_file = "../../artifacts/tokenizers/fineweb_edu_32k/tokenizer.json"
+name = "25m-calibration-muon-1e-2"
+output_dir = "../../../artifacts/runs"
+model_config = "../../models/25m.toml"
+train_manifest = "../../../artifacts/data/fineweb_edu/tokens/train.manifest.json"
+validation_manifest = "../../../artifacts/data/fineweb_edu/tokens/validation.manifest.json"
+tokenizer_file = "../../../artifacts/tokenizers/fineweb_edu_32k/tokenizer.json"
 seed = 1729
 
 [runtime]
@@ -22,8 +22,8 @@ deterministic = true
 allow_tf32 = false
 
 [optimizer]
-kind = "angular_muown"
-learning_rate = 0.02
+kind = "muon"
+learning_rate = 0.01
 auxiliary_learning_rate = 0.0003
 weight_decay = 0.01
 betas = [0.9, 0.95]
@@ -40,8 +40,7 @@ cooldown_steps = 100
 final_learning_rate_ratio = 0.1
 
 [quantization]
-mode = "transition"
-transition_tokens = 13107200
+mode = "disabled"
 
 [tracking]
 tensorboard = true

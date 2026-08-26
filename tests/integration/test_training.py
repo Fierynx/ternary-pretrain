@@ -14,7 +14,14 @@ from ternary_pretrain.evaluation.runner import evaluate_checkpoint, load_native_
 from ternary_pretrain.export import export_checkpoint
 from ternary_pretrain.model import DecoderLM
 from ternary_pretrain.training import train
+from ternary_pretrain.training.manifest import _git_state
 from tests.testing import ExperimentFixture
+
+
+def test_container_build_revision_is_recorded(tmp_path: Path) -> None:
+    revision = "a" * 40
+    (tmp_path / ".build-revision").write_text(f"{revision}\n", encoding="utf-8")
+    assert _git_state(tmp_path) == {"revision": revision, "dirty": None}
 
 
 def checkpoint_model(path: Path) -> dict[str, torch.Tensor]:
